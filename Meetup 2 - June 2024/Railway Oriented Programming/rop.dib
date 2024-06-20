@@ -1,0 +1,236 @@
+#!meta
+
+{"kernelInfo":{"defaultKernelName":"csharp","items":[{"aliases":[],"name":"csharp"}]}}
+
+#!markdown
+
+# Railway Oriented Programming
+
+**Term coined by Scott Wlaschin  to describe a way to abstract away error handling.**
+
+_Many examples in functional programming assume that you are always on the “happy path”. But to create a robust real world application you must deal with validation, logging, network and service errors, and other annoyances._
+
+_So, how do you handle all this in a clean functional way?_
+
+- Scott Wlaschin
+
+![](output.png)
+
+Famous for:
+- F# for Fun and Profit
+- Domain Modeling Made Functional
+
+#!markdown
+
+# Typical C# code
+*The happy path is not in focus. Distracting error handling...*
+
+#!csharp
+
+// What if the functions may return null?
+// string input(string _) => null;
+// string processing(string _) => null;
+
+string input(string i) => i;
+string processing(string i) => $"We're {i}! 🎉";
+void output(string i) => Console.WriteLine(i);
+
+var a = input("LivingIT");
+if (a is not null)
+{
+    var b = processing(a);
+    if (b is not null)
+    {
+        output(b);
+    }
+}
+
+#!markdown
+
+# Establish the "happy path"
+*The business logic that will execute in 99.99%*
+
+#!mermaid
+
+flowchart LR
+input --> processing --> output
+
+#!csharp
+
+string input(string i) => i;
+string processing(string i) => $"We're {i}! 🎉";
+void output(string i) => Console.WriteLine(i);
+
+output(processing(input("LivingIT")));
+
+#!markdown
+
+👆*Not in the right order.*
+
+#!mermaid
+
+flowchart RL
+input --> processing --> output
+
+#!markdown
+
+# Using temporary variables
+
+#!csharp
+
+var a = input("LivingIT");
+var b = processing(a);
+output(b);
+
+#!markdown
+
+👆*This reads in the correct order but we need to handle temporary variables.*
+
+#!markdown
+
+# Using fluent syntax
+Taking inspiration from F# using the pipe operator '|>':
+
+#!fsharp
+
+let input (i: string) = i
+let processing (i: string) = $"We're {i}! 🎉"
+let output (i: string) = Console.WriteLine(i)
+
+input "LivingIT"
+|> processing
+|> output
+
+#!markdown
+
+Trying to do the same in C#:
+
+#!csharp
+
+// The top level class in C# interactive is static
+// so you can declare extension methods here.
+public static TOut Map<TIn, TOut>(this TIn input, Func<TIn, TOut> func) => func(input);
+public static void Map<T>(this T input, Action<T> action) => action(input);
+
+// This reads in the correct order and doesn't need temporary variables.
+input("LivingIT")
+.Map(processing)
+.Map(output);
+
+#!markdown
+
+👆*This reads in the correct order and doesn't rely on temporary variables.*
+
+#!markdown
+
+# How can we handle errors in a fluent way?
+*We know how to define the happy path with a fluent API, but there's still no error handling.*
+
+![](railway.png)
+### In F# (with the Option monad):
+
+#!fsharp
+
+let input (i: string) = Some(i)
+let inputFailing (i: string) = None
+let processing (i: string) = Some($"We're {i}! 🎉")
+let processingFailing (i: string) = None
+let output (i: string) = Console.WriteLine(i)
+
+input "LivingIT"
+|> Option.bind processing
+|> Option.iter output
+
+#!markdown
+
+### In C# (emulating the Option monad with nullable reference types):
+
+#!csharp
+
+#nullable enable
+public static TOut? Map<TIn, TOut>(this TIn input, Func<TIn, TOut> func) => 
+    input is null ? default(TOut) : func(input);
+
+public static void Map<T>(this T input, Action<T> action)
+{ 
+    if(input is not null) action(input);
+}
+
+#!csharp
+
+// What if the functions may return null?
+string inputFailing(string _) => null;
+string processingFailing(string _) => null;
+
+input("LivingIT")
+.Map(processing)
+.Map(output);
+
+#!markdown
+
+👆*This has the drawback that it's hard to determine which function failed.*
+
+# Introducing the Result monad
+### Using the Result monad in F#:
+
+#!fsharp
+
+let input(i: string) = Ok(i)
+// let input(i : string) = Error("Error in input")
+let processing (i: string) = Ok($"We're {i}! 🎉")
+//let processing (i: string) = Error("Error in processing")
+let output (i: string) = Console.WriteLine(i)
+
+input "LivingIT"
+|> Result.bind processing
+|> Result.mapError (fun (e: string) -> Console.WriteLine(e))
+|> Result.iter output
+
+#!markdown
+
+### Implementing the Result monad in C#:
+
+#!csharp
+
+public record Result<T>
+{
+    public T Value = default;
+    public string Error = null;
+
+    public static implicit operator Result<T>(T value) => new Result<T> { Value = value };
+    
+    public Result<TOut> Map<TOut>(Func<T, Result<TOut>> func)
+    { 
+        if (Error is null) return func(Value);
+        else return new Result<TOut> { Error = Error };
+    }
+
+    public Result<T> Map(Action<T> action)
+    { 
+        if (Error is null) action(Value); 
+        return this;
+    }
+
+    public Result<T> OnError(Action<string> action)
+    { 
+        if(Error is not null) action(Error); 
+        return this;
+    }
+}
+
+#!markdown
+
+### Using the Result monad in C#:
+
+#!csharp
+
+Result<string> input(string i) => i;
+Result<string> inputFailing(string _) => new() { Error = "Input failed!" };
+Result<string> processing(string i) => $"We're {i}! 🎉";
+Result<string> processingFailing(string _) => new() { Error = "Processing failed!" };
+void output(string i) => Console.WriteLine(i);
+
+input("LivingIT")
+.Map(processing)
+.Map(output)
+.OnError(Console.WriteLine);
