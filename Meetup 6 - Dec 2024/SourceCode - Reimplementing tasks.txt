@@ -1,0 +1,138 @@
+Below is the final source for the application we wrote together.
+
+Questions? Feel free to connect with me at:
+
+Email: tore@tn-data.se
+Web: https://tn-data.se
+Blog: https://nestenius.se
+LinkedIn: https://www.linkedin.com/in/torenestenius/
+
+##################################################################################
+
+
+using System.Collections.Concurrent;
+
+for (int i = 0; i < 10; i++)
+{
+    int tid = i;
+    MyTask task = MyTask.Run(() =>
+    {
+        Console.WriteLine($"Thread {tid} Started on TID " 
+                      + Environment.CurrentManagedThreadId);
+        Thread.Sleep(5000);
+        Console.WriteLine("Thread Done");
+    });
+}
+Console.ReadLine();
+
+
+
+public class MyTask
+{
+    private bool completed;
+    private Exception? exception;
+    //private object lockObject2 = new();
+    private Lock   lockObject = new();
+    //TODO 
+    public bool IsCompleted
+    {
+        get
+        {
+            lock(lockObject)
+            {
+                return completed;
+            }
+        }
+    }
+
+    public void SetResult()
+    {
+        Completed(); 
+    }
+
+    public void SetException(Exception exception)
+    {
+        Completed();
+        this.exception = exception;
+    }
+
+    private void Completed()
+    {
+        lock(lockObject)
+        {
+            if (completed)
+                throw new InvalidOperationException();
+
+            completed = true;
+        }
+    }
+
+    internal static MyTask Run(Action work)
+    {
+        MyTask task = new MyTask();
+
+        MyThreadPool.QueueUserWorkItem(state =>
+        {
+            try
+            {
+                work();
+                task.SetResult();
+            }
+            catch (Exception ex)
+            {
+                task.SetException(ex);
+            }
+
+        });
+        return task;
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+internal class MyThreadPool
+{
+    private static BlockingCollection< (Action<object?> workItem, object? state)>
+                                       queue = new();
+
+
+    internal static void QueueUserWorkItem(Action<object?> workItem, 
+                                           object? state = null)
+    {
+        queue.Add( (workItem, state));
+    }
+
+    static MyThreadPool()
+    {
+        for(int i=0;i<2;i++)
+        {
+            var thread = new Thread(() =>
+            {
+                while(true)
+                {
+                    //Remove one item from the queue
+                    (Action<object?> workItem, object? state) = queue.Take();
+
+                    Console.WriteLine("Processing workitem with state=" + state);
+                    Console.WriteLine("Worker thread ID = " + Environment.CurrentManagedThreadId);
+                    //Execute the work item
+                    workItem(state);
+                }
+            });
+            thread.IsBackground = true;
+            thread.Start();
+        }
+    }
+}
+
+
